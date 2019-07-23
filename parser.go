@@ -70,9 +70,12 @@ func (p *parser) readFilter() (f filter, err error) {
 				return nil, err
 			}
 			return fNumericLiteral(num), nil
+		case tLeftBracket:
+			return p.parseSliceFilter()
 		case tText:
 			return p.parseTextFilter(t)
 		case tPipe:
+			// nil returns won't be added
 			return nil, nil
 		case tEOF:
 			return f, io.EOF
@@ -103,6 +106,19 @@ func (p *parser) parseTextFilter(t token) (f filter, err error) {
 		return fLength(0), nil
 	default:
 		return fStringLiteral(t.Text), nil
+	}
+}
+
+func (p *parser) parseSliceFilter() (f filter, err error) {
+	r := &fRangeSelector{}
+	for {
+		t := p.scan()
+		switch t.Type {
+		case tRightBracket:
+			return r, nil
+		default:
+			return nil, p.errorf("unexpected token: %v", t)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"strings"
+	"regexp"
 )
 
 // newScanner allocates a scanner from an io.Reader
@@ -20,58 +21,54 @@ type scanner struct {
 	tok               token
 	text              strings.Builder
 	line, col, offset int
-	readNewline       bool
 	err               error
 }
 
 // Scan reads one token from the input stream
 func (s *scanner) Scan() token {
-	inText := false
-	inLiteral := false
 	s.text.Reset()
+
 
 	for {
 		ch := s.read()
 
 		switch ch {
 		case eof:
-			if inText || inLiteral {
-				return s.newTok(tText)
-			}
 			return s.newTok(tEOF)
-		// ignore line feeds
-		case '\r':
+		// ignore whitespace
+		case '\r', ' ':
 			continue
+
 		case '|':
-			if !inText {
-				return s.newTok(tPipe)
-			}
-			s.text.WriteRune(ch)
+			return s.newTok(tPipe)
+		case '[':
+			return s.newTok(tLeftBracket)
+		case ':':
+			return s.newTok(tColon)
+		case ']':
+			return s.newTok(tRightBracket)
 		case '.':
-			if inLiteral {
-				if err := s.unread(); err != nil {
-					panic(err)
+			if p, err := s.r.Peek(1); err == nil {
+				if isNumericByte(p[0]) {
+					return s.scanNumber()
 				}
-				return s.newTextTok()
 			}
-			if !inText {
-				return s.newTok(tDot)
+			return s.newTok(tDot)
+		case '-':
+			if p, err := s.r.Peek(1); err == nil {
+				if isNumericByte(p[0]) {
+					return s.scanNumber()
+				}
 			}
-			s.text.WriteRune(ch)
+			return s.newTok(tMinus)
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			s.unread()
+			return s.scanNumber()
 		case '"':
-			if inText {
-				return s.newTextTok()
-			}
-			inText = true
-		case ' ':
-			if inLiteral {
-				return s.newTextTok()
-			}
+			return s.scanQuotedText()
 		default:
 			s.text.WriteRune(ch)
-			if !inText {
-				inLiteral = true
-			}
+			return s.scanLiteral()
 		}
 	}
 }
@@ -100,11 +97,59 @@ func (s *scanner) newTok(t tokenType) token {
 }
 
 func (s *scanner) newTextTok() token {
-	// TODO (b5) - handle numeric literals
 	return token{
 		Type: tText,
 		Text: strings.TrimSpace(s.text.String()),
 		Pos:  position{Line: s.line, Col: s.col, Offset: s.offset},
+	}
+}
+
+var literalMatch = regexp.MustCompile(`[\w,_,-,\n]`)
+
+func (s *scanner) scanLiteral() token {
+		for {
+			ch := s.read()
+			if literalMatch.MatchString(string(ch)) {
+				s.text.WriteRune(ch)
+			} else {
+				return s.newTextTok()
+			}
+		}
+}
+
+func (s *scanner) scanQuotedText() token {
+	for {
+		ch := s.read()
+		switch ch {
+		default:
+			s.text.WriteRune(ch)
+		case '"', eof:
+			return s.newTextTok()
+		}
+	}
+}
+
+func (s *scanner) scanNumber() token {
+	for {
+		ch := s.read()
+		if isNumericByte(byte(ch)) {
+			s.text.WriteRune(ch)
+		} else {
+			return token{
+				Type: tNumber,
+				Text: strings.TrimSpace(s.text.String()),
+				Pos:  position{Line: s.line, Col: s.col, Offset: s.offset},
+			}
+		}
+	}
+}
+
+func isNumericByte(b byte) bool {
+	switch b {
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.':
+		return true
+	default:
+		return false
 	}
 }
 

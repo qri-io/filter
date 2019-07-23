@@ -26,6 +26,8 @@ func TestApply(t *testing.T) {
 		{".bar", foo{Bar: "b", Baz: 10}, "b"},
 		{".a.bar", map[string]interface{}{"a": foo{"b", 0}}, "b"},
 		{".a | length", map[string]interface{}{"a": foo{"b", 0}}, 2},
+
+		{"[]", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
 	}
 
 	for _, c := range fieldCases {

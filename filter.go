@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/qri-io/dataset/vals"
 )
 
 // Apply executes a filter string against a given source, returning a filtered result
@@ -93,6 +95,10 @@ type fKeySelector string
 func (f fKeySelector) isSelector() {}
 
 func (f fKeySelector) apply(in value) (out value, err error) {
+	if keyable, ok := in.(vals.Keyable); ok {
+		return keyable.ValueForKey(string(f))
+	}
+
 	target := reflect.ValueOf(in)
 	if target.Kind() == reflect.Ptr {
 		target = target.Elem()
@@ -137,13 +143,29 @@ func (f fKeySelector) selectStructField(target reflect.Value) (out value, err er
 }
 
 type fRangeSelector struct {
-	start string
-	stop  string
+	start  string
+	starti int
+	stop   string
+	stopi  int
 }
 
-func (f fRangeSelector) isSelector() {}
+func (f *fRangeSelector) isSelector() {}
 
-func (f fRangeSelector) apply(in value) (out value, err error) {
+func (f *fRangeSelector) apply(in value) (out value, err error) {
+
+	target := reflect.ValueOf(in)
+	if target.Kind() == reflect.Ptr {
+		target = target.Elem()
+	}
+
+	switch target.Kind() {
+	case reflect.Slice:
+		if f.stopi == 0 {
+			f.stopi = target.Len()
+		}
+		return target.Slice(f.starti, f.stopi).Interface(), nil
+	}
+
 	return nil, fmt.Errorf("range selection not finished")
 }
 
