@@ -27,7 +27,12 @@ func TestApply(t *testing.T) {
 		{".a.bar", map[string]interface{}{"a": foo{"b", 0}}, "b"},
 		{".a | length", map[string]interface{}{"a": foo{"b", 0}}, 2},
 
-		{"[]", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
+		{".[]", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
+		{".[1]", []string{"a", "b", "c"}, "b"},
+		{".[0:2]", []string{"a", "b", "c"}, []string{"a","b"}},
+		{".bar.[0:2]", map[string]interface{}{"bar": []string{"a","b","c"}}, []string{"a", "b"}},
+
+		// {".bar .a", map[string]interface{}{"bar": []interface{}{map[string]string{"a":"a"}, map[string]string{"a":"b"}, map[string]string{"a":"c"}}}, []string{"a", "b"}},
 	}
 
 	for _, c := range fieldCases {

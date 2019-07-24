@@ -20,6 +20,7 @@ func Apply(filterStr string, source interface{}) (val interface{}, err error) {
 
 	val = source
 	for _, f := range filters {
+		// TODO - resolve links here
 		val, err = f.apply(val)
 		if err != nil {
 			return val, err
@@ -142,16 +143,50 @@ func (f fKeySelector) selectStructField(target reflect.Value) (out value, err er
 	return nil, nil
 }
 
-type fRangeSelector struct {
-	start  string
-	starti int
-	stop   string
-	stopi  int
+type fIndexSelector int
+
+func (f fIndexSelector) isSelector() {}
+
+func (f fIndexSelector) apply(in value) (out value, err error) {
+	target := reflect.ValueOf(in)
+	if target.Kind() == reflect.Ptr {
+		target = target.Elem()
+	}
+
+	switch target.Kind() {
+	case reflect.Slice:
+		return target.Index(int(f)).Interface(), nil
+	}
+
+	return nil, fmt.Errorf("select index of non array type")
 }
 
-func (f *fRangeSelector) isSelector() {}
+type fIndexRangeSelector struct {
+	start int
+	stop  int
+	all bool
+}
 
-func (f *fRangeSelector) apply(in value) (out value, err error) {
+func (f *fIndexRangeSelector) isSelector() {}
+
+func (f *fIndexRangeSelector) apply(in value) (out value, err error) {
+	if it, ok := in.(vals.Iterator); ok {
+		vals := []interface{}{}
+		for {
+			e, done := it.Next()
+			if done {
+				return vals, nil
+			}
+			if e.Index < f.start {
+				continue
+			}
+			if e.Index == f.stop && !f.all {
+				return vals, nil
+			}
+
+			vals = append(vals, e.Value)
+		}
+	}
 
 	target := reflect.ValueOf(in)
 	if target.Kind() == reflect.Ptr {
@@ -160,10 +195,10 @@ func (f *fRangeSelector) apply(in value) (out value, err error) {
 
 	switch target.Kind() {
 	case reflect.Slice:
-		if f.stopi == 0 {
-			f.stopi = target.Len()
+		if f.all {
+			f.stop = target.Len()
 		}
-		return target.Slice(f.starti, f.stopi).Interface(), nil
+		return target.Slice(f.start, f.stop).Interface(), nil
 	}
 
 	return nil, fmt.Errorf("range selection not finished")

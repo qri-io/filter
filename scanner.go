@@ -135,6 +135,7 @@ func (s *scanner) scanNumber() token {
 		if isNumericByte(byte(ch)) {
 			s.text.WriteRune(ch)
 		} else {
+			s.unread()
 			return token{
 				Type: tNumber,
 				Text: strings.TrimSpace(s.text.String()),

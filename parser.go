@@ -92,7 +92,11 @@ func (p *parser) readSelector() (sel fSelector, err error) {
 		case tText:
 			sel = append(sel, fKeySelector(t.Text))
 		case tLeftBracket:
-			return nil, fmt.Errorf("range selection not yet supported")
+			sf, err := p.parseSliceFilter()
+			if err != nil {
+				return nil, err
+			}
+			sel = append(sel, sf)
 		default:
 			p.unscan()
 			return sel, nil
@@ -109,15 +113,38 @@ func (p *parser) parseTextFilter(t token) (f filter, err error) {
 	}
 }
 
-func (p *parser) parseSliceFilter() (f filter, err error) {
-	r := &fRangeSelector{}
+func (p *parser) parseSliceFilter() (f selector, err error) {
+	r := &fIndexRangeSelector{}
+	hasColon := false
+	empty := true
+	hasDigit := false
 	for {
 		t := p.scan()
 		switch t.Type {
+		case tNumber:
+			num, err := strconv.ParseInt(t.Text, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			if !hasColon {
+				r.start = int(num)
+				} else {
+					r.stop = int(num)
+				}
+				hasDigit = true
+				empty = false
+		case tColon:
+			hasColon = true
 		case tRightBracket:
+			if !hasColon && !empty {
+				return fIndexSelector(int(r.start)), nil
+			}
+			if empty || !hasDigit && hasColon {
+				r.all = true
+			}
 			return r, nil
 		default:
-			return nil, p.errorf("unexpected token: %v", t)
+			return nil, p.errorf("unexpected token: %#v", t)
 		}
 	}
 }
