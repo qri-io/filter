@@ -47,12 +47,18 @@ const (
 	tRightBracket
 	// tLeftBrace is the "{" character
 	tLeftBrace
-	// tLeftBrace is the "}" character
+	// tRightBrace is the "}" character
 	tRightBrace
+	// tLeftParen is the "(" character
+	tLeftParen
+	// tRightParen is the ")" character
+	tRightParen
 	// tPlus is the "+" character
 	tPlus
 	// tMinus is the "-" character
 	tMinus
+	// tStar is th "*" character
+	tStar
 	// tForwardSlash is the "/" character
 	tForwardSlash
 	// literalEnd marks the end of literal tokens in the token enumeration
@@ -76,27 +82,35 @@ func (tt tokenType) String() string {
 	case tNumber:
 		return "Number"
 	case tDot:
-		return "Dot"
+		return "."
 	case tComma:
-		return "Comma"
+		return ","
 	case tColon:
-		return "Colon"
+		return ":"
 	case tPipe:
-		return "Pipe"
+		return "|"
+
 	case tLeftBracket:
-		return "LeftBracket"
+		return "["
 	case tRightBracket:
-		return "RightBracket"
+		return "]"
 	case tLeftBrace:
-		return "LeftBrace"
+		return "{"
 	case tRightBrace:
-		return "RightBrace"
+		return "}"
+	case tLeftParen:
+		return "("
+	case tRightParen:
+		return ")"
+
 	case tPlus:
-		return "Plus"
+		return "+"
 	case tMinus:
-		return "Minus"
+		return "-"
+	case tStar:
+		return "*"
 	case tForwardSlash:
-		return "ForwardSlash"
+		return "/"
 
 	case tLength:
 		return "length"

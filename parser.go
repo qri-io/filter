@@ -59,6 +59,7 @@ func (p *parser) filters() (fs []filter, err error) {
 
 func (p *parser) readFilter() (f filter, err error) {
 	var fs fSlice
+
 	for {
 		t := p.scan()
 
@@ -74,6 +75,10 @@ func (p *parser) readFilter() (f filter, err error) {
 				return nil, err
 			}
 			f = fNumericLiteral(num)
+		case tStar, tPlus, tMinus:
+			if f, err = p.parseBinaryOp(f, t); err != nil {
+				return f, err
+			}
 		case tLeftBracket:
 			if f, err = p.parseSliceFilter(); err != nil {
 				return nil, err
@@ -97,6 +102,12 @@ func (p *parser) readFilter() (f filter, err error) {
 			return f, io.EOF
 		}
 	}
+}
+
+func (p *parser) parseBinaryOp(left filter, t token) (f fBinaryOp, err error) {
+	f = fBinaryOp{left: left, op: t.Type}
+	f.right, err = p.readFilter()
+	return f, err
 }
 
 func (p *parser) readSelector() (sel fSelector, err error) {

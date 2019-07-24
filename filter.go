@@ -29,11 +29,26 @@ func Apply(filterStr string, source interface{}) (val interface{}, err error) {
 		}
 	}
 
-	if it, ok := val.(*iterator); ok {
-		return it.v.Interface(), err
+	return unpackIterators(val)
+}
+
+func unpackIterators(in value) (val interface{}, err error) {
+	if it, ok := in.(vals.Iterator); ok {
+		vs := []interface{}{}
+		defer it.Done()
+		for {
+			ent, done := it.Next()
+			if done {
+				return vs, nil
+			}
+			if val, err = unpackIterators(ent.Value); err != nil {
+				return nil, err
+			}
+			vs = append(vs, val)
+		}
 	}
 
-	return val, err
+	return in, nil
 }
 
 type filter interface {
@@ -58,6 +73,9 @@ func (f fNumericLiteral) apply(in value) (out value, err error) {
 type fLength byte
 
 func (f fLength) apply(in value) (out value, err error) {
+	if in == nil {
+		return 0, nil
+	}
 	target := reflect.ValueOf(in)
 	if target.Kind() == reflect.Ptr {
 		target = target.Elem()
@@ -102,9 +120,9 @@ type fKeySelector string
 func (f fKeySelector) isSelector() {}
 
 func (f fKeySelector) apply(in value) (out value, err error) {
-	if keyable, ok := in.(vals.Keyable); ok {
-		return keyable.ValueForKey(string(f))
-	}
+	// if keyable, ok := in.(vals.Keyable); ok {
+	// 	return keyable.ValueForKey(string(f))
+	// }
 
 	if it, ok := in.(vals.Iterator); ok {
 		vals := []interface{}{}
@@ -122,13 +140,37 @@ func (f fKeySelector) apply(in value) (out value, err error) {
 		}
 	}
 
+	target := reflect.ValueOf(in)
+	if target.Kind() == reflect.Ptr {
+		target = target.Elem()
+	}
+
+	if target.Kind() == reflect.Slice {
+		vals := []interface{}{}
+		l := target.Len()
+		for i := 0; i < l; i++ {
+			v, err := f.applySingle(target.Index(i).Interface())
+			if err != nil {
+				return nil, err
+			}
+			vals = append(vals, v)
+		}
+		// fmt.Printf("returning array application: %v\n", vals)
+		return vals, nil
+	}
+
 	return f.applySingle(in)
 }
 
 func (f fKeySelector) applySingle(in value) (out value, err error) {
 	if in == nil {
-		return nil, fmt.Errorf("cannot select key of nil")
+		return nil, nil
 	}
+
+	if keyable, ok := in.(vals.Keyable); ok {
+		return keyable.ValueForKey(string(f))
+	}
+
 	// fmt.Printf("key selector input: %#v\n", in)
 	t := reflect.ValueOf(in)
 	if t.Kind() == reflect.Ptr {
@@ -138,6 +180,8 @@ func (f fKeySelector) applySingle(in value) (out value, err error) {
 	}
 
 	switch t.Kind() {
+	case reflect.String:
+		return nil, nil
 	case reflect.Struct:
 		return f.selectStructField(t)
 	case reflect.Map:
@@ -145,7 +189,7 @@ func (f fKeySelector) applySingle(in value) (out value, err error) {
 		return val.Interface(), nil
 	}
 
-	return nil, fmt.Errorf("unexpected value: %#v", in)
+	return nil, fmt.Errorf("unexpected key selector value: %#v", in)
 }
 
 func (f fKeySelector) selectStructField(target reflect.Value) (out value, err error) {
@@ -194,6 +238,11 @@ func (f fIndexSelector) apply(in value) (out value, err error) {
 			vals = append(vals, v)
 		}
 	}
+
+	// target := reflect.ValueOf(in)
+	// if target.Kind() == reflect.Ptr {
+	// 	target = target.Elem()
+	// }
 
 	// if target.Kind() == reflect.Slice {
 	// 	vals := []interface{}{}
@@ -281,7 +330,7 @@ func (f *fIndexRangeSelector) apply(in value) (out value, err error) {
 		return &iterator{v: target.Slice(f.start, f.stop)}, nil
 	}
 
-	return nil, fmt.Errorf("unexpected value: %v", in)
+	return nil, fmt.Errorf("unexpected range value: %#v", in)
 }
 
 type iterator struct {
@@ -304,15 +353,57 @@ func (it *iterator) ValueForIndex(i int) (v interface{}, err error) {
 	return it.v.Index(i).Interface(), nil
 }
 
-// type fBinaryOp struct {
-// 	left  filter
-// 	op    token
-// 	right filter
-// }
+type fBinaryOp struct {
+	left  filter
+	op    tokenType
+	right filter
+}
 
-// func (f fBinaryOp) apply(in value) (out value, err error) {
-// 	return nil, fmt.Errorf("binary operations are not finished")
-// }
+func (f fBinaryOp) apply(in value) (out value, err error) {
+	left, err := f.left.apply(in)
+	if err != nil {
+		return nil, err
+	}
+	left, lk := normalizeValue(left)
+
+	right, err := f.right.apply(in)
+	if err != nil {
+		return nil, err
+	}
+	right, rk := normalizeValue(right)
+
+	switch f.op {
+	case tStar:
+		if lk == reflect.Float64 && rk == reflect.Float64 {
+			return left.(float64) * right.(float64), nil
+		}
+	case tPlus:
+		if lk == reflect.Float64 && rk == reflect.Float64 {
+			return left.(float64) + right.(float64), nil
+		}
+	}
+
+	fmt.Printf("binary operations are not finished cannot %v %#v %s %v %#v\n", lk, left, f.op, rk, right)
+	return nil, fmt.Errorf("binary operations are not finished cannot %#v %s %#v", left, f.op, right)
+}
+
+func normalizeValue(in value) (out value, rk reflect.Kind) {
+	if nl, ok := in.(fNumericLiteral); ok {
+		return float64(nl), reflect.Float64
+	} else if sl, ok := in.(fStringLiteral); ok {
+		return string(sl), reflect.String
+	}
+
+	rk = reflect.TypeOf(in).Kind()
+	switch rk {
+	case reflect.Int:
+		return float64(in.(int)), reflect.Float64
+	case reflect.Float64:
+		return in, rk
+	}
+
+	return in, rk
+}
 
 type fSlice []filter
 

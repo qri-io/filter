@@ -27,12 +27,12 @@ func TestApply(t *testing.T) {
 		{".a.bar", map[string]interface{}{"a": foo{"b", 0}}, "b"},
 		{".a | length", map[string]interface{}{"a": foo{"b", 0}}, 2},
 
-		{".[:]", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
+		{".[:]", []string{"a", "b", "c"}, []interface{}{"a", "b", "c"}},
 		{"[1]", []string{"a", "b", "c"}, "b"},
-		{".[0:2]", []string{"a", "b", "c"}, []string{"a", "b"}},
-		{".bar.[0:2]", map[string]interface{}{"bar": []string{"a", "b", "c"}}, []string{"a", "b"}},
+		{".[0:2]", []string{"a", "b", "c"}, []interface{}{"a", "b"}},
+		{".bar.[0:2]", map[string]interface{}{"bar": []string{"a", "b", "c"}}, []interface{}{"a", "b"}},
 
-		{".bar[:].a",
+		{".bar.a",
 			map[string]interface{}{
 				"bar": []interface{}{
 					map[string]string{"a": "a"},
@@ -40,6 +40,9 @@ func TestApply(t *testing.T) {
 					map[string]string{"a": "c"}}}, []interface{}{"a", "b", "c"}},
 
 		{".foo, .bar", map[string]string{"bar": "a", "foo": "b", "camp": "lucky"}, []interface{}{"b", "a"}},
+
+		{".bar * 5", map[string]interface{}{"bar": 5}, float64(25)},
+		// {"( .bar | length ) x 5", map[string]interface{}{ "bar": []string{"a","b","c"} }, 15},
 	}
 
 	for _, c := range fieldCases {

@@ -42,10 +42,14 @@ func (s *scanner) Scan() token {
 			return s.newTok(tPipe)
 		case '[':
 			return s.newTok(tLeftBracket)
-		case ':':
-			return s.newTok(tColon)
 		case ']':
 			return s.newTok(tRightBracket)
+		case '(':
+			return s.newTok(tLeftParen)
+		case ')':
+			return s.newTok(tRightParen)
+		case ':':
+			return s.newTok(tColon)
 		case '.':
 			if p, err := s.r.Peek(1); err == nil {
 				if isNumericByte(p[0]) {
@@ -55,6 +59,9 @@ func (s *scanner) Scan() token {
 			return s.newTok(tDot)
 		case ',':
 			return s.newTok(tComma)
+
+		case '+':
+			return s.newTok(tPlus)
 		case '-':
 			if p, err := s.r.Peek(1); err == nil {
 				if isNumericByte(p[0]) {
@@ -62,6 +69,11 @@ func (s *scanner) Scan() token {
 				}
 			}
 			return s.newTok(tMinus)
+		case '*':
+			return s.newTok(tStar)
+		case '/':
+			return s.newTok(tForwardSlash)
+
 		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 			s.unread()
 			return s.scanNumber()
