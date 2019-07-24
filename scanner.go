@@ -3,8 +3,8 @@ package filter
 import (
 	"bufio"
 	"io"
-	"strings"
 	"regexp"
+	"strings"
 )
 
 // newScanner allocates a scanner from an io.Reader
@@ -27,7 +27,6 @@ type scanner struct {
 // Scan reads one token from the input stream
 func (s *scanner) Scan() token {
 	s.text.Reset()
-
 
 	for {
 		ch := s.read()
@@ -54,6 +53,8 @@ func (s *scanner) Scan() token {
 				}
 			}
 			return s.newTok(tDot)
+		case ',':
+			return s.newTok(tComma)
 		case '-':
 			if p, err := s.r.Peek(1); err == nil {
 				if isNumericByte(p[0]) {
@@ -104,17 +105,18 @@ func (s *scanner) newTextTok() token {
 	}
 }
 
-var literalMatch = regexp.MustCompile(`[\w,_,-,\n]`)
+var literalMatch = regexp.MustCompile(`[\w\n_\-]`)
 
 func (s *scanner) scanLiteral() token {
-		for {
-			ch := s.read()
-			if literalMatch.MatchString(string(ch)) {
-				s.text.WriteRune(ch)
-			} else {
-				return s.newTextTok()
-			}
+	for {
+		ch := s.read()
+		if literalMatch.MatchString(string(ch)) {
+			s.text.WriteRune(ch)
+		} else {
+			s.unread()
+			return s.newTextTok()
 		}
+	}
 }
 
 func (s *scanner) scanQuotedText() token {

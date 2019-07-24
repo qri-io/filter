@@ -27,19 +27,26 @@ func TestApply(t *testing.T) {
 		{".a.bar", map[string]interface{}{"a": foo{"b", 0}}, "b"},
 		{".a | length", map[string]interface{}{"a": foo{"b", 0}}, 2},
 
-		{".[]", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
-		{".[1]", []string{"a", "b", "c"}, "b"},
-		{".[0:2]", []string{"a", "b", "c"}, []string{"a","b"}},
-		{".bar.[0:2]", map[string]interface{}{"bar": []string{"a","b","c"}}, []string{"a", "b"}},
+		{".[:]", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
+		{"[1]", []string{"a", "b", "c"}, "b"},
+		{".[0:2]", []string{"a", "b", "c"}, []string{"a", "b"}},
+		{".bar.[0:2]", map[string]interface{}{"bar": []string{"a", "b", "c"}}, []string{"a", "b"}},
 
-		// {".bar .a", map[string]interface{}{"bar": []interface{}{map[string]string{"a":"a"}, map[string]string{"a":"b"}, map[string]string{"a":"c"}}}, []string{"a", "b"}},
+		{".bar[:].a",
+			map[string]interface{}{
+				"bar": []interface{}{
+					map[string]string{"a": "a"},
+					map[string]string{"a": "b"},
+					map[string]string{"a": "c"}}}, []interface{}{"a", "b", "c"}},
+
+		{".foo, .bar", map[string]string{"bar": "a", "foo": "b", "camp": "lucky"}, []interface{}{"b", "a"}},
 	}
 
 	for _, c := range fieldCases {
 		t.Run(fmt.Sprintf("Filter_%s", c.filter), func(t *testing.T) {
 			got, err := Apply(c.filter, c.source)
 			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Fatalf("error: %s", err)
 			}
 			if diff := cmp.Diff(c.value, got); diff != "" {
 				t.Errorf("value mismatch (-want +got):\n%s", diff)

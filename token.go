@@ -65,3 +65,43 @@ const (
 	// keywordEnd marks the end of keyword tokens in the token enumeration
 	keywordEnd
 )
+
+func (tt tokenType) String() string {
+	switch tt {
+	case tEOF:
+		return "EOF"
+
+	case tText:
+		return "Text"
+	case tNumber:
+		return "Number"
+	case tDot:
+		return "Dot"
+	case tComma:
+		return "Comma"
+	case tColon:
+		return "Colon"
+	case tPipe:
+		return "Pipe"
+	case tLeftBracket:
+		return "LeftBracket"
+	case tRightBracket:
+		return "RightBracket"
+	case tLeftBrace:
+		return "LeftBrace"
+	case tRightBrace:
+		return "RightBrace"
+	case tPlus:
+		return "Plus"
+	case tMinus:
+		return "Minus"
+	case tForwardSlash:
+		return "ForwardSlash"
+
+	case tLength:
+		return "length"
+
+	default:
+		return "<unknown>"
+	}
+}

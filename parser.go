@@ -40,12 +40,13 @@ func (p *parser) unscan() {
 	p.buf.n = 1
 }
 
-func (p *parser) read() (fs []filter, err error) {
+func (p *parser) filters() (fs []filter, err error) {
 	for {
 		f, err := p.readFilter()
 		// fmt.Println("read filter:", f, err)
 		if err != nil {
 			if err.Error() == "EOF" {
+				fs = append(fs, f)
 				return fs, nil
 			}
 			return nil, err
@@ -57,27 +58,42 @@ func (p *parser) read() (fs []filter, err error) {
 }
 
 func (p *parser) readFilter() (f filter, err error) {
+	var fs fSlice
 	for {
 		t := p.scan()
 
 		switch t.Type {
 		case tDot:
 			p.unscan()
-			return p.readSelector()
+			if f, err = p.readSelector(); err != nil {
+				return
+			}
 		case tNumber:
 			num, err := strconv.ParseFloat(t.Text, 64)
 			if err != nil {
 				return nil, err
 			}
-			return fNumericLiteral(num), nil
+			f = fNumericLiteral(num)
 		case tLeftBracket:
-			return p.parseSliceFilter()
+			if f, err = p.parseSliceFilter(); err != nil {
+				return nil, err
+			}
 		case tText:
-			return p.parseTextFilter(t)
+			if f, err = p.parseTextFilter(t); err != nil {
+				return nil, err
+			}
+		case tComma:
+			fs = append(fs, f)
 		case tPipe:
+			if len(fs) > 0 {
+				return append(fs, f), nil
+			}
 			// nil returns won't be added
-			return nil, nil
+			return f, nil
 		case tEOF:
+			if len(fs) > 0 {
+				return append(fs, f), io.EOF
+			}
 			return f, io.EOF
 		}
 	}
@@ -118,6 +134,7 @@ func (p *parser) parseSliceFilter() (f selector, err error) {
 	hasColon := false
 	empty := true
 	hasDigit := false
+
 	for {
 		t := p.scan()
 		switch t.Type {
@@ -128,13 +145,15 @@ func (p *parser) parseSliceFilter() (f selector, err error) {
 			}
 			if !hasColon {
 				r.start = int(num)
-				} else {
-					r.stop = int(num)
-				}
-				hasDigit = true
-				empty = false
+			} else {
+				r.stop = int(num)
+			}
+			hasDigit = true
+			empty = false
 		case tColon:
 			hasColon = true
+		case tLeftBracket:
+			continue
 		case tRightBracket:
 			if !hasColon && !empty {
 				return fIndexSelector(int(r.start)), nil
