@@ -48,6 +48,10 @@ func (s *scanner) Scan() token {
 			return s.newTok(tLeftParen)
 		case ')':
 			return s.newTok(tRightParen)
+		case '{':
+			return s.newTok(tLeftBrace)
+		case '}':
+			return s.newTok(tRightBrace)
 		case ':':
 			return s.newTok(tColon)
 		case '.':

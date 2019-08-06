@@ -44,15 +44,14 @@ func (p *parser) filters() (fs []filter, err error) {
 	for {
 		f, err := p.readFilter()
 		// fmt.Println("read filter:", f, err)
+		if f != nil {
+			fs = append(fs, f)
+		}
 		if err != nil {
 			if err.Error() == "EOF" {
-				fs = append(fs, f)
 				return fs, nil
 			}
 			return nil, err
-		}
-		if f != nil {
-			fs = append(fs, f)
 		}
 	}
 }
@@ -83,17 +82,21 @@ func (p *parser) readFilter() (f filter, err error) {
 			if f, err = p.parseSliceFilter(); err != nil {
 				return nil, err
 			}
+		case tLeftBrace:
+			return p.parseObjectMapping()
 		case tText:
 			if f, err = p.parseTextFilter(t); err != nil {
 				return nil, err
 			}
 		case tComma:
 			fs = append(fs, f)
+			return fs, nil
 		case tPipe:
 			if len(fs) > 0 {
 				return append(fs, f), nil
 			}
 			// nil returns won't be added
+			// TODO (b5) - I don't think it's legal to pipe without a preceding filter
 			return f, nil
 		case tEOF:
 			if len(fs) > 0 {
@@ -101,6 +104,33 @@ func (p *parser) readFilter() (f filter, err error) {
 			}
 			return f, io.EOF
 		}
+	}
+}
+
+func (p *parser) readOneFilter() (f filter, err error) {
+	t := p.scan()
+
+	switch t.Type {
+	case tDot:
+		p.unscan()
+		return p.readSelector()
+	case tNumber:
+		num, err := strconv.ParseFloat(t.Text, 64)
+		if err != nil {
+			return nil, err
+		}
+		return fNumericLiteral(num), nil
+	case tStar, tPlus, tMinus:
+		return p.parseBinaryOp(f, t)
+	case tLeftBracket:
+		return p.parseSliceFilter()
+	case tLeftBrace:
+		return p.parseObjectMapping()
+	case tText:
+		return p.parseTextFilter(t)
+	default:
+		p.unscan()
+		return nil, nil
 	}
 }
 
@@ -144,12 +174,12 @@ func (p *parser) parseSliceFilter() (f selector, err error) {
 	r := &fIndexRangeSelector{}
 	hasColon := false
 	empty := true
-	hasDigit := false
 
 	for {
 		t := p.scan()
 		switch t.Type {
 		case tNumber:
+			// TODO (b5) - this needs to handle floating point numbers
 			num, err := strconv.ParseInt(t.Text, 10, 64)
 			if err != nil {
 				return nil, err
@@ -159,9 +189,9 @@ func (p *parser) parseSliceFilter() (f selector, err error) {
 			} else {
 				r.stop = int(num)
 			}
-			hasDigit = true
 			empty = false
 		case tColon:
+			empty = false
 			hasColon = true
 		case tLeftBracket:
 			continue
@@ -169,12 +199,73 @@ func (p *parser) parseSliceFilter() (f selector, err error) {
 			if !hasColon && !empty {
 				return fIndexSelector(int(r.start)), nil
 			}
-			if empty || !hasDigit && hasColon {
-				r.all = true
+			if empty {
+				return fIterateAllSeletor(false), nil
 			}
 			return r, nil
 		default:
-			return nil, p.errorf("unexpected token: %#v", t)
+			if hasColon {
+				return nil, p.errorf("unexpected token: %#v", t)
+			}
+
+			am := fSlice{}
+			if r.start != 0 {
+				am = append(am, fNumericLiteral(float64(r.start)))
+			}
+			p.unscan()
+			return p.completeArrayMap(am)
+		}
+	}
+}
+
+func (p *parser) completeArrayMap(am fSlice) (f selector, err error) {
+	var cursor filter
+	for {
+		t := p.scan()
+		switch t.Type {
+		case tRightBracket:
+			if cursor != nil {
+				am = append(am, cursor)
+			}
+			return am, nil
+		case tComma:
+			am = append(am, cursor)
+			cursor = nil
+			continue
+		default:
+			p.unscan()
+			if cursor, err = p.readOneFilter(); err != nil {
+				return nil, err
+			}
+		}
+	}
+}
+
+func (p *parser) parseObjectMapping() (f filter, err error) {
+	objf := fObjectMapping{}
+	key := ""
+
+	for {
+		t := p.scan()
+		switch t.Type {
+		case tText:
+			if key != "" {
+				return nil, fmt.Errorf("unexpected string: %s", t.Text)
+			}
+			key = t.Text
+		case tColon:
+			f, err = p.readOneFilter()
+			if err != nil {
+				return nil, err
+			}
+			objf[key] = f
+		case tComma:
+			key = ""
+		case tRightBrace:
+			// fmt.Printf("finished obj mapping: %#v\n", objf)
+			return objf, nil
+		default:
+			return nil, fmt.Errorf("unexpected token: %s %#v", t.Type, t)
 		}
 	}
 }

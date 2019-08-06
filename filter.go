@@ -21,70 +21,72 @@ func Apply(filterStr string, source interface{}) (val interface{}, err error) {
 	val = source
 	for _, f := range filters {
 		// fmt.Printf("run filter: %#v\n", f)
-		// TODO - resolve links here
-		val, err = f.apply(val)
-		// fmt.Printf("result: %#v\n", val)
-		if err != nil {
+		if val, err = f.apply(val); err != nil {
 			return val, err
 		}
+		// fmt.Printf("result: %#v\n", val)
 	}
 
-	return unpackIterators(val)
+	return unpackValueStreams(val)
 }
 
-func unpackIterators(in value) (val interface{}, err error) {
-	if it, ok := in.(vals.Iterator); ok {
-		vs := []interface{}{}
-		defer it.Done()
-		for {
-			ent, done := it.Next()
-			if done {
-				return vs, nil
-			}
-			if val, err = unpackIterators(ent.Value); err != nil {
+type filter interface {
+	apply(in interface{}) (out interface{}, err error)
+}
+
+func unpackValueStreams(in interface{}) (val interface{}, err error) {
+	if vs, ok := in.(*valueStream); ok {
+		vals := []interface{}{}
+		var v interface{}
+		for vs.Next(&v) {
+			if val, err = unpackValueStreams(v); err != nil {
 				return nil, err
 			}
-			vs = append(vs, val)
+			vals = append(vals, val)
 		}
+		return vals, nil
 	}
 
 	return in, nil
 }
 
-type filter interface {
-	apply(in value) (out value, err error)
-}
-
-type value interface {
-}
-
 type fStringLiteral string
 
-func (f fStringLiteral) apply(in value) (out value, err error) {
+func (f fStringLiteral) apply(in interface{}) (out interface{}, err error) {
+	if v, ok := in.(*valueStream); ok {
+		return applyToStream(v, f)
+	}
 	return string(f), nil
 }
 
 type fNumericLiteral float64
 
-func (f fNumericLiteral) apply(in value) (out value, err error) {
+func (f fNumericLiteral) apply(in interface{}) (out interface{}, err error) {
 	return f, nil
 }
 
 type fLength byte
 
-func (f fLength) apply(in value) (out value, err error) {
-	if in == nil {
-		return 0, nil
-	}
-	target := reflect.ValueOf(in)
-	if target.Kind() == reflect.Ptr {
-		target = target.Elem()
-	}
-	switch target.Kind() {
-	case reflect.Struct:
-		return target.NumField(), nil
+func (f fLength) apply(in interface{}) (out interface{}, err error) {
+
+	switch v := in.(type) {
+	case *valueStream:
+		return applyToStream(v, f)
+	case string:
+		return len(v), nil
+	case []byte:
+		return len(v), nil
+	case map[interface{}]interface{}:
+		return len(v), nil
+	case map[string]interface{}:
+		return len(v), nil
+	case []interface{}:
+		return len(v), nil
+
+	case nil, bool, byte, int, float64:
+		return nil, nil
 	default:
-		return target.Len(), nil
+		return nil, fmt.Errorf("unexpected type: %T", in)
 	}
 }
 
@@ -95,7 +97,7 @@ type selector interface {
 
 type fSelector []selector
 
-func (f fSelector) apply(in value) (out value, err error) {
+func (f fSelector) apply(in interface{}) (out interface{}, err error) {
 	out = in
 	for _, sel := range f {
 		out, err = sel.apply(out)
@@ -111,7 +113,7 @@ type fIdentity byte
 
 func (f fIdentity) isSelector() {}
 
-func (f fIdentity) apply(in value) (out value, err error) {
+func (f fIdentity) apply(in interface{}) (out interface{}, err error) {
 	return in, nil
 }
 
@@ -119,168 +121,109 @@ type fKeySelector string
 
 func (f fKeySelector) isSelector() {}
 
-func (f fKeySelector) apply(in value) (out value, err error) {
-	// if keyable, ok := in.(vals.Keyable); ok {
-	// 	return keyable.ValueForKey(string(f))
-	// }
+func (f fKeySelector) apply(in interface{}) (out interface{}, err error) {
+	// TODO (b5) - interface assertion checks
 
-	if it, ok := in.(vals.Iterator); ok {
-		vals := []interface{}{}
-		for {
-			e, done := it.Next()
-			if done {
-				return vals, nil
+	switch v := in.(type) {
+	case *valueStream:
+		return applyToStream(v, f)
+	case map[interface{}]interface{}:
+		return v[string(f)], err
+	case map[string]interface{}:
+		return v[string(f)], err
+	case []interface{}:
+		res := make([]interface{}, len(v))
+		for i, d := range v {
+			res[i], err = f.apply(d)
+			if err != nil {
+				return nil, err
 			}
+		}
+		return res, nil
 
-			val, err := f.apply(e.Value)
+	case nil, bool, byte, int, float64, string, []byte:
+		// TODO (b5) - should we error here?
+		return nil, nil
+	}
+
+	if vr, ok := in.(vals.ValueStream); ok {
+		vals := []interface{}{}
+		var v interface{}
+		for vr.Next(&v) {
+			val, err := f.apply(v)
 			if err != nil {
 				return nil, err
 			}
 			vals = append(vals, val)
 		}
-	}
-
-	target := reflect.ValueOf(in)
-	if target.Kind() == reflect.Ptr {
-		target = target.Elem()
-	}
-
-	if target.Kind() == reflect.Slice {
-		vals := []interface{}{}
-		l := target.Len()
-		for i := 0; i < l; i++ {
-			v, err := f.applySingle(target.Index(i).Interface())
-			if err != nil {
-				return nil, err
-			}
-			vals = append(vals, v)
-		}
-		// fmt.Printf("returning array application: %v\n", vals)
 		return vals, nil
 	}
 
-	return f.applySingle(in)
-}
-
-func (f fKeySelector) applySingle(in value) (out value, err error) {
-	if in == nil {
+	if kvs, ok := in.(vals.KeyValueStream); ok {
+		var v interface{}
+		var key string
+		s := string(f)
+		for kvs.Next(&key, &v) {
+			if key == s {
+				return v, kvs.Close()
+			}
+		}
 		return nil, nil
 	}
 
 	if keyable, ok := in.(vals.Keyable); ok {
-		return keyable.ValueForKey(string(f))
+		return keyable.MapIndex(string(f)), nil
 	}
 
-	// fmt.Printf("key selector input: %#v\n", in)
-	t := reflect.ValueOf(in)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	} else if t.Kind() == reflect.Interface {
-		t = t.Elem()
-	}
-
-	switch t.Kind() {
-	case reflect.String:
-		return nil, nil
-	case reflect.Struct:
-		return f.selectStructField(t)
-	case reflect.Map:
-		val := t.MapIndex(reflect.ValueOf(string(f)))
-		return val.Interface(), nil
-	}
-
-	return nil, fmt.Errorf("unexpected key selector value: %#v", in)
-}
-
-func (f fKeySelector) selectStructField(target reflect.Value) (out value, err error) {
-	str := string(f)
-	for i := 0; i < target.NumField(); i++ {
-		// Lowercase the key in order to make matching case-insensitive.
-		fieldName := target.Type().Field(i).Name
-		// lowerName := strings.ToLower(fieldName)
-
-		fieldTag := target.Type().Field(i).Tag
-		if fieldTag != "" && fieldTag.Get("json") != "" {
-			jsonName := fieldTag.Get("json")
-			pos := strings.Index(jsonName, ",")
-			if pos != -1 {
-				jsonName = jsonName[:pos]
-			}
-			// lowerName = strings.ToLower(jsonName)
-			fieldName = jsonName
-		}
-
-		if fieldName == str {
-			return target.Field(i).Interface(), nil
-		}
-	}
-
-	// TODO (b5) - is not finding a key an error?
-	return nil, nil
+	return nil, fmt.Errorf("unexpected type: %T", in)
 }
 
 type fIndexSelector int
 
 func (f fIndexSelector) isSelector() {}
 
-func (f fIndexSelector) apply(in value) (out value, err error) {
-	if it, ok := in.(*iterator); ok {
-		vals := []interface{}{}
-		for {
-			e, done := it.Next()
-			if done {
-				return vals, nil
-			}
-			v, err := f.applySingle(e.Value)
-			if err != nil {
-				return nil, err
-			}
-			vals = append(vals, v)
-		}
+func (f fIndexSelector) apply(in interface{}) (out interface{}, err error) {
+
+	switch v := in.(type) {
+	case *valueStream:
+		return applyToStream(v, f)
+	case string:
+		return v[int(f)], nil
+	case []byte:
+		return v[int(f)], nil
+	case []interface{}:
+		return v[int(f)], nil
+
+	case nil, bool, byte, int, float64, map[string]interface{}, map[interface{}]interface{}:
+		// TODO (b5) - should we error here?
+		return nil, nil
 	}
 
-	// target := reflect.ValueOf(in)
-	// if target.Kind() == reflect.Ptr {
-	// 	target = target.Elem()
-	// }
+	if vr, ok := in.(vals.ValueStream); ok {
+		var v interface{}
 
-	// if target.Kind() == reflect.Slice {
-	// 	vals := []interface{}{}
-	// 	l := target.Len()
-	// 	for i := 0; i < l; i++ {
-	// 		v, err := f.applySingle(target.Index(i))
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 		vals = append(vals, v)
-	// 	}
-	// 	// fmt.Printf("returning array application: %v\n", vals)
-	// 	return vals, nil
-	// }
+		i := 0
+		for vr.Next(&v) {
+			if i == int(f) {
+				return v, nil
+			}
+			i++
+		}
+		return nil, nil
+	}
 
-	return f.applySingle(in)
+	// TODO (b5) - what do about a KeyValueStream here?
+	// also, ordered KeyValueStream? Too much?
+
+	return nil, fmt.Errorf("unexpected type: %T", in)
 }
 
-func (f fIndexSelector) applySingle(in value) (out value, err error) {
-	if indexer, ok := in.(vals.Indexable); ok {
-		return indexer.ValueForIndex(int(f))
-	}
+type fIterateAllSeletor bool
 
-	target := reflect.ValueOf(in)
-	if target.Kind() == reflect.Ptr {
-		target = target.Elem()
-	}
+func (f fIterateAllSeletor) isSelector() {}
 
-	if target.Kind() == reflect.Interface {
-		target = target.Elem()
-	}
-
-	switch target.Kind() {
-	case reflect.Slice:
-		return target.Index(int(f)).Interface(), nil
-	}
-
-	return nil, fmt.Errorf("select index of non array type %#v", target)
+func (f fIterateAllSeletor) apply(in interface{}) (out interface{}, err error) {
+	return newStream(in)
 }
 
 type fIndexRangeSelector struct {
@@ -291,66 +234,54 @@ type fIndexRangeSelector struct {
 
 func (f *fIndexRangeSelector) isSelector() {}
 
-func (f *fIndexRangeSelector) apply(in value) (out value, err error) {
-	if it, ok := in.(vals.Iterator); ok {
-		// TODO (b5) - can't use this trick b/c the internal iterater implementation
-		// is being used as a signal to the next filter that it needs to iterate
-		// should probs find another way to pass this message along
-		// if f.all {
-		// 	return it, nil
-		// }
+func (f *fIndexRangeSelector) apply(in interface{}) (out interface{}, err error) {
+	switch v := in.(type) {
+	case *valueStream:
+		return applyToStream(v, f)
+	case string:
+		if f.all {
+			return v, nil
+		}
+		return v[f.start:f.stop], nil
+	case []byte:
+		if f.all {
+			return v, nil
+		}
+		return v[f.start:f.stop], nil
+	case []interface{}:
+		if f.all {
+			return v, nil
+		}
+		if f.stop == 0 {
+			return v[f.start:], nil
+		}
+		return v[f.start:f.stop], nil
 
+	case nil, bool, byte, int, float64, map[string]interface{}, map[interface{}]interface{}:
+		// TODO (b5) - should we error here?
+		return nil, nil
+	}
+
+	if it, ok := in.(vals.ValueStream); ok {
 		vals := []interface{}{}
-		for {
-			e, done := it.Next()
-			if done {
-				return &iterator{v: reflect.ValueOf(vals)}, nil
-			}
-			if e.Index < f.start {
+		var v interface{}
+
+		fmt.Println(f)
+
+		for i := 0; it.Next(&v); i++ {
+			if i < f.start && !f.all {
 				continue
 			}
-			if e.Index == f.stop && !f.all {
-				return &iterator{v: reflect.ValueOf(vals)}, nil
+			if i == f.stop && !f.all {
+				return vals, nil
 			}
 
-			vals = append(vals, e.Value)
+			vals = append(vals, v)
 		}
+		return vals, nil
 	}
 
-	target := reflect.ValueOf(in)
-	if target.Kind() == reflect.Ptr {
-		target = target.Elem()
-	}
-
-	switch target.Kind() {
-	case reflect.Slice:
-		if f.all {
-			f.stop = target.Len()
-		}
-		return &iterator{v: target.Slice(f.start, f.stop)}, nil
-	}
-
-	return nil, fmt.Errorf("unexpected range value: %#v", in)
-}
-
-type iterator struct {
-	i int
-	v reflect.Value
-}
-
-func (it *iterator) Next() (e *vals.Entry, done bool) {
-	defer func() { it.i++ }()
-	// fmt.Println(it.i)
-	if it.i == it.v.Len() {
-		return nil, true
-	}
-	return &vals.Entry{Index: it.i, Value: it.v.Index(it.i).Interface()}, false
-}
-
-func (it *iterator) Done() {}
-
-func (it *iterator) ValueForIndex(i int) (v interface{}, err error) {
-	return it.v.Index(i).Interface(), nil
+	return nil, fmt.Errorf("unexpected type: %T", in)
 }
 
 type fBinaryOp struct {
@@ -359,7 +290,7 @@ type fBinaryOp struct {
 	right filter
 }
 
-func (f fBinaryOp) apply(in value) (out value, err error) {
+func (f fBinaryOp) apply(in interface{}) (out interface{}, err error) {
 	left, err := f.left.apply(in)
 	if err != nil {
 		return nil, err
@@ -383,11 +314,10 @@ func (f fBinaryOp) apply(in value) (out value, err error) {
 		}
 	}
 
-	fmt.Printf("binary operations are not finished cannot %v %#v %s %v %#v\n", lk, left, f.op, rk, right)
 	return nil, fmt.Errorf("binary operations are not finished cannot %#v %s %#v", left, f.op, right)
 }
 
-func normalizeValue(in value) (out value, rk reflect.Kind) {
+func normalizeValue(in interface{}) (out interface{}, rk reflect.Kind) {
 	if nl, ok := in.(fNumericLiteral); ok {
 		return float64(nl), reflect.Float64
 	} else if sl, ok := in.(fStringLiteral); ok {
@@ -405,12 +335,35 @@ func normalizeValue(in value) (out value, rk reflect.Kind) {
 	return in, rk
 }
 
+// fSlics is a group of filters
 type fSlice []filter
 
-func (fs fSlice) apply(in value) (out value, err error) {
-	vals := make([]interface{}, len(fs))
-	for i, f := range fs {
-		if vals[i], err = f.apply(in); err != nil {
+func (fSlice) isSelector() {}
+
+func (f fSlice) apply(in interface{}) (out interface{}, err error) {
+	if v, ok := in.(*valueStream); ok {
+		return applyToStream(v, f)
+	}
+
+	vals := make([]interface{}, len(f))
+	for i, fi := range f {
+		if vals[i], err = fi.apply(in); err != nil {
+			return nil, err
+		}
+	}
+	return vals, nil
+}
+
+type fObjectMapping map[string]filter
+
+func (f fObjectMapping) apply(in interface{}) (out interface{}, err error) {
+	if v, ok := in.(*valueStream); ok {
+		return applyToStream(v, f)
+	}
+
+	vals := map[string]interface{}{}
+	for key, f := range f {
+		if vals[key], err = f.apply(in); err != nil {
 			return nil, err
 		}
 	}
