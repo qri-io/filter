@@ -91,6 +91,7 @@ func TestArrayMapping(t *testing.T) {
 
 		// TODO (b5) - implicit array mapping
 		// {".foo, .bar", map[string]interface{}{"bar": "a", "foo": "b", "camp": "lucky"}, []interface{}{"b", "a"}},
+
 		// TODO (b5) - current parser will choke on floating point literals in first position
 		// {`[34.5, .]`, d("a"), d(`[34.5, "a"]`)},
 	}

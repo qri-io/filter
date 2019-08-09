@@ -83,7 +83,7 @@ func (p *parser) readFilter() (f filter, err error) {
 				return nil, err
 			}
 		case tLeftBrace:
-			return p.parseObjectMapping()
+			return p.parseObjectMap()
 		case tText:
 			if f, err = p.parseTextFilter(t); err != nil {
 				return nil, err
@@ -125,12 +125,12 @@ func (p *parser) readOneFilter() (f filter, err error) {
 	case tLeftBracket:
 		return p.parseSliceFilter()
 	case tLeftBrace:
-		return p.parseObjectMapping()
+		return p.parseObjectMap()
 	case tText:
 		return p.parseTextFilter(t)
 	default:
 		p.unscan()
-		return nil, nil
+		return nil, fmt.Errorf("unexpected token: %s", t.Type.String())
 	}
 }
 
@@ -140,7 +140,8 @@ func (p *parser) parseBinaryOp(left filter, t token) (f fBinaryOp, err error) {
 	return f, err
 }
 
-func (p *parser) readSelector() (sel fSelector, err error) {
+func (p *parser) readSelector() (f filter, err error) {
+	var sel fSelector
 	for {
 		t := p.scan()
 		switch t.Type {
@@ -154,6 +155,8 @@ func (p *parser) readSelector() (sel fSelector, err error) {
 				return nil, err
 			}
 			sel = append(sel, sf)
+		// case tComma:
+		// return p.completeArrayMap(fSlice{sel})
 		default:
 			p.unscan()
 			return sel, nil
@@ -221,17 +224,20 @@ func (p *parser) parseSliceFilter() (f selector, err error) {
 func (p *parser) completeArrayMap(am fSlice) (f selector, err error) {
 	var cursor filter
 	for {
+		if cursor != nil {
+			am = append(am, cursor)
+			cursor = nil
+		}
+
 		t := p.scan()
 		switch t.Type {
 		case tRightBracket:
-			if cursor != nil {
-				am = append(am, cursor)
-			}
 			return am, nil
 		case tComma:
-			am = append(am, cursor)
-			cursor = nil
 			continue
+		case tEOF:
+			p.unscan()
+			return am, nil
 		default:
 			p.unscan()
 			if cursor, err = p.readOneFilter(); err != nil {
@@ -241,7 +247,7 @@ func (p *parser) completeArrayMap(am fSlice) (f selector, err error) {
 	}
 }
 
-func (p *parser) parseObjectMapping() (f filter, err error) {
+func (p *parser) parseObjectMap() (f filter, err error) {
 	objf := fObjectMapping{}
 	key := ""
 
@@ -262,7 +268,6 @@ func (p *parser) parseObjectMapping() (f filter, err error) {
 		case tComma:
 			key = ""
 		case tRightBrace:
-			// fmt.Printf("finished obj mapping: %#v\n", objf)
 			return objf, nil
 		default:
 			return nil, fmt.Errorf("unexpected token: %s %#v", t.Type, t)
