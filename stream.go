@@ -2,8 +2,6 @@ package filter
 
 import (
 	"fmt"
-
-	"github.com/qri-io/dataset/vals"
 )
 
 func newStream(in interface{}) (res *valueStream, err error) {
@@ -23,15 +21,15 @@ func newStream(in interface{}) (res *valueStream, err error) {
 
 	// TODO (b5) - handle link
 
-	if vs, ok := in.(vals.ValueStream); ok {
-		res.val = vs
-		return res, err
-	}
+	// if vs, ok := in.(vals.ValueStream); ok {
+	// 	res.val = vs
+	// 	return res, err
+	// }
 
-	if kvs, ok := in.(vals.KeyValueStream); ok {
-		res.val = kvs
-		return res, err
-	}
+	// if kvs, ok := in.(vals.KeyValueStream); ok {
+	// 	res.val = kvs
+	// 	return res, err
+	// }
 
 	return nil, fmt.Errorf("unrecognized type: %T", in)
 }
@@ -44,7 +42,7 @@ type valueStream struct {
 	vals []interface{}
 }
 
-var _ vals.ValueStream = (*valueStream)(nil)
+// var _ vals.ValueStream = (*valueStream)(nil)
 
 func (it *valueStream) Next(v *interface{}) (more bool) {
 	if it.val == nil && it.vals == nil {

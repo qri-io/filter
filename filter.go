@@ -1,11 +1,12 @@
 package filter
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
 
-	"github.com/qri-io/dataset/vals"
+	"github.com/qri-io/vals"
 )
 
 // Apply executes a filter string against a given source, returning a filtered result
@@ -122,7 +123,13 @@ type fKeySelector string
 func (f fKeySelector) isSelector() {}
 
 func (f fKeySelector) apply(in interface{}) (out interface{}, err error) {
-	// TODO (b5) - interface assertion checks
+
+	if link, ok := in.(vals.Link); ok {
+		in, err = link.Resolve(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	switch v := in.(type) {
 	case *valueStream:
@@ -146,34 +153,34 @@ func (f fKeySelector) apply(in interface{}) (out interface{}, err error) {
 		return nil, nil
 	}
 
-	if vr, ok := in.(vals.ValueStream); ok {
-		vals := []interface{}{}
-		var v interface{}
-		for vr.Next(&v) {
-			val, err := f.apply(v)
-			if err != nil {
-				return nil, err
-			}
-			vals = append(vals, val)
-		}
-		return vals, nil
-	}
+	// if vr, ok := in.(vals.ValueStream); ok {
+	// 	vals := []interface{}{}
+	// 	var v interface{}
+	// 	for vr.Next(&v) {
+	// 		val, err := f.apply(v)
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
+	// 		vals = append(vals, val)
+	// 	}
+	// 	return vals, nil
+	// }
 
-	if kvs, ok := in.(vals.KeyValueStream); ok {
-		var v interface{}
-		var key string
-		s := string(f)
-		for kvs.Next(&key, &v) {
-			if key == s {
-				return v, kvs.Close()
-			}
-		}
-		return nil, nil
-	}
+	// if kvs, ok := in.(vals.KeyValueStream); ok {
+	// 	var v interface{}
+	// 	var key string
+	// 	s := string(f)
+	// 	for kvs.Next(&key, &v) {
+	// 		if key == s {
+	// 			return v, kvs.Close()
+	// 		}
+	// 	}
+	// 	return nil, nil
+	// }
 
-	if keyable, ok := in.(vals.Keyable); ok {
-		return keyable.MapIndex(string(f)), nil
-	}
+	// if keyable, ok := in.(vals.Keyable); ok {
+	// 	return keyable.MapIndex(string(f)), nil
+	// }
 
 	return nil, fmt.Errorf("unexpected type: %T", in)
 }
@@ -183,6 +190,13 @@ type fIndexSelector int
 func (f fIndexSelector) isSelector() {}
 
 func (f fIndexSelector) apply(in interface{}) (out interface{}, err error) {
+
+	if link, ok := in.(vals.Link); ok {
+		in, err = link.Resolve(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	switch v := in.(type) {
 	case *valueStream:
@@ -199,18 +213,18 @@ func (f fIndexSelector) apply(in interface{}) (out interface{}, err error) {
 		return nil, nil
 	}
 
-	if vr, ok := in.(vals.ValueStream); ok {
-		var v interface{}
+	// if vr, ok := in.(vals.ValueStream); ok {
+	// 	var v interface{}
 
-		i := 0
-		for vr.Next(&v) {
-			if i == int(f) {
-				return v, nil
-			}
-			i++
-		}
-		return nil, nil
-	}
+	// 	i := 0
+	// 	for vr.Next(&v) {
+	// 		if i == int(f) {
+	// 			return v, nil
+	// 		}
+	// 		i++
+	// 	}
+	// 	return nil, nil
+	// }
 
 	// TODO (b5) - what do about a KeyValueStream here?
 	// also, ordered KeyValueStream? Too much?
@@ -223,6 +237,13 @@ type fIterateAllSeletor bool
 func (f fIterateAllSeletor) isSelector() {}
 
 func (f fIterateAllSeletor) apply(in interface{}) (out interface{}, err error) {
+	if link, ok := in.(vals.Link); ok {
+		in, err = link.Resolve(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return newStream(in)
 }
 
@@ -235,6 +256,13 @@ type fIndexRangeSelector struct {
 func (f *fIndexRangeSelector) isSelector() {}
 
 func (f *fIndexRangeSelector) apply(in interface{}) (out interface{}, err error) {
+	if link, ok := in.(vals.Link); ok {
+		in, err = link.Resolve(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	switch v := in.(type) {
 	case *valueStream:
 		return applyToStream(v, f)
@@ -262,24 +290,24 @@ func (f *fIndexRangeSelector) apply(in interface{}) (out interface{}, err error)
 		return nil, nil
 	}
 
-	if it, ok := in.(vals.ValueStream); ok {
-		vals := []interface{}{}
-		var v interface{}
+	// if it, ok := in.(vals.ValueStream); ok {
+	// 	vals := []interface{}{}
+	// 	var v interface{}
 
-		fmt.Println(f)
+	// 	fmt.Println(f)
 
-		for i := 0; it.Next(&v); i++ {
-			if i < f.start && !f.all {
-				continue
-			}
-			if i == f.stop && !f.all {
-				return vals, nil
-			}
+	// 	for i := 0; it.Next(&v); i++ {
+	// 		if i < f.start && !f.all {
+	// 			continue
+	// 		}
+	// 		if i == f.stop && !f.all {
+	// 			return vals, nil
+	// 		}
 
-			vals = append(vals, v)
-		}
-		return vals, nil
-	}
+	// 		vals = append(vals, v)
+	// 	}
+	// 	return vals, nil
+	// }
 
 	return nil, fmt.Errorf("unexpected type: %T", in)
 }
@@ -341,6 +369,13 @@ type fSlice []filter
 func (fSlice) isSelector() {}
 
 func (f fSlice) apply(in interface{}) (out interface{}, err error) {
+	if link, ok := in.(vals.Link); ok {
+		in, err = link.Resolve(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if v, ok := in.(*valueStream); ok {
 		return applyToStream(v, f)
 	}
